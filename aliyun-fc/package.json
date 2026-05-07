@@ -1,0 +1,9 @@
+{
+  "name": "wanfeng-survey-fc",
+  "version": "1.0.0",
+  "description": "万峰小件速运调查问卷 FC 函数",
+  "main": "index.js",
+  "dependencies": {
+    "tablestore": "^5.4.0"
+  }
+}

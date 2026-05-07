@@ -1,0 +1,18 @@
+# 工具痕迹
+.claude/
+.gstack/
+.DS_Store
+node_modules/
+
+# 内部材料(不公开)
+*.docx
+*.pdf
+*.png
+小件速运-万峰项目-决策分析.html
+小件速运-商业模式验证调查表-微信版.html
+小件速运-商业模式验证调查表.md
+小件速运-微信分享调查部署说明.md
+小件速运-微信小程序发布步骤.md
+小件速运-腾讯问卷复制导入版.md
+是否立项-汇报结论.html
+wechat-mini-survey/
