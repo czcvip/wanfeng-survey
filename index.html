@@ -308,6 +308,58 @@
 
     .error.show { display: block; }
 
+    /* 顶部浮动提示条（手机端必填校验提示，避免被键盘/sticky 按钮遮挡） */
+    .toast-error {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 12px);
+      left: 12px;
+      right: 12px;
+      z-index: 9999;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: #b42318;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.45;
+      box-shadow: 0 8px 24px rgba(180, 35, 24, 0.35);
+      transform: translateY(-120%);
+      transition: transform 0.25s ease;
+      pointer-events: none;
+    }
+
+    .toast-error.show {
+      transform: translateY(0);
+    }
+
+    /* 必填项缺失时的高亮抖动 */
+    .field.missing > label {
+      color: var(--danger);
+    }
+
+    .field.missing input[type="text"],
+    .field.missing input[type="tel"],
+    .field.missing input[type="number"],
+    .field.missing select,
+    .field.missing textarea,
+    .field.missing .choices {
+      outline: 2px solid var(--danger);
+      outline-offset: 2px;
+      border-radius: var(--radius);
+    }
+
+    .field.shake {
+      animation: field-shake 0.45s ease;
+    }
+
+    @keyframes field-shake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-6px); }
+      40% { transform: translateX(6px); }
+      60% { transform: translateX(-4px); }
+      80% { transform: translateX(4px); }
+    }
+
     @media (max-width: 720px) {
       h1 { font-size: 24px; }
       .status { grid-template-columns: 1fr 1fr; }
@@ -535,6 +587,10 @@
     function renderField(field) {
       const wrap = document.createElement("div");
       wrap.className = "field";
+      wrap.dataset.fieldId = field.id;
+      wrap.dataset.fieldLabel = field.label;
+      wrap.dataset.fieldType = field.type;
+      wrap.dataset.fieldRequired = field.required ? "1" : "0";
       const label = document.createElement("label");
       label.textContent = field.label;
       label.htmlFor = field.id;
@@ -632,14 +688,68 @@
     }
 
 
+    /* 顶部浮动 toast：手机上 reportValidity 经常不显示，统一用这个保证可见 */
+    const toastEl = document.createElement("div");
+    toastEl.className = "toast-error";
+    document.body.appendChild(toastEl);
+    let toastTimer = null;
+    function showToast(text, ms = 3200) {
+      toastEl.textContent = text;
+      toastEl.classList.add("show");
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove("show"), ms);
+    }
+
+    /* 自己实现校验：返回所有未填的必填字段（不依赖 reportValidity） */
+    function findMissingRequired() {
+      const missing = [];
+      const fieldDivs = form.querySelectorAll(".field");
+      fieldDivs.forEach((wrap) => {
+        if (wrap.dataset.fieldRequired !== "1") return;
+        const fid = wrap.dataset.fieldId;
+        const ftype = wrap.dataset.fieldType;
+        const flabel = wrap.dataset.fieldLabel || fid;
+        let filled = false;
+        if (ftype === "checkbox") {
+          filled = !!form.querySelector(`input[name="${fid}"]:checked`);
+        } else if (ftype === "radio") {
+          filled = !!form.querySelector(`input[name="${fid}"]:checked`);
+        } else {
+          const el = form.querySelector(`[name="${fid}"]`);
+          filled = !!(el && el.value && el.value.trim());
+        }
+        if (!filled) missing.push({ id: fid, label: flabel, wrap });
+      });
+      return missing;
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!form.checkValidity() || !requiredCheckboxValid()) {
-        errorBox.textContent = "请补充必填项后再提交。";
+
+      // 先清掉所有旧的高亮
+      form.querySelectorAll(".field.missing, .field.shake").forEach((el) => {
+        el.classList.remove("missing", "shake");
+      });
+
+      const missing = findMissingRequired();
+      if (missing.length > 0) {
+        // 给所有未填项加红框
+        missing.forEach((m) => m.wrap.classList.add("missing"));
+        // 滚到第一个 + 抖动
+        const first = missing[0];
+        first.wrap.scrollIntoView({ behavior: "smooth", block: "center" });
+        // 滚到位再抖（避免抖动影响 scrollIntoView）
+        setTimeout(() => first.wrap.classList.add("shake"), 350);
+        // 顶部 toast
+        const list = missing.slice(0, 3).map((m) => m.label).join("、");
+        const more = missing.length > 3 ? `，共 ${missing.length} 项` : "";
+        showToast(`还有未填写的必填项：${list}${more}`);
+        // 兼容老的下方 errorBox
+        errorBox.textContent = `请补充必填项（${missing.length} 项未填）后再提交。`;
         errorBox.classList.add("show");
-        form.reportValidity();
         return;
       }
+
       errorBox.classList.remove("show");
       lastRecord = collectData();
 
@@ -653,18 +763,32 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(lastRecord)
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) {
+          const bodyText = await response.text().catch(() => "");
+          throw new Error(`HTTP ${response.status}${bodyText ? " " + bodyText.slice(0, 80) : ""}`);
+        }
         form.style.display = "none";
         if (typeSection) typeSection.style.display = "none";
         resultPanel.classList.add("show");
         resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
       } catch (error) {
-        errorBox.textContent = "提交失败：" + (error && error.message ? error.message : "网络异常") + "，请稍后重试或联系负责人。";
+        const msg = error && error.message ? error.message : "网络异常";
+        errorBox.textContent = "提交失败：" + msg + "，请稍后重试或联系负责人。";
         errorBox.classList.add("show");
+        showToast("提交失败：" + msg + "（请检查网络后重试）", 5000);
       } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = originalText;
       }
+    });
+
+    /* 全局兜底：任何脚本异常或未捕获的 Promise 都用 toast 抛出来，避免手机静默失败 */
+    window.addEventListener("error", (e) => {
+      showToast("页面错误：" + (e.message || "unknown") + "（请截屏反馈）", 5000);
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      const reason = e.reason && e.reason.message ? e.reason.message : String(e.reason || "");
+      showToast("异步错误：" + reason + "（请截屏反馈）", 5000);
     });
 
     document.getElementById("resetBtn").addEventListener("click", () => {
